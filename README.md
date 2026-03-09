@@ -26,7 +26,7 @@
 
 ## Overview
 
-**Stratos** is an AI-powered financial advisor for retail investors. Users manage their investment portfolios through a modern web interface, then trigger a multi-agent AI pipeline that produces:
+**Stratos** is an AI-native financial advisor for retail investors. Users manage their investment portfolios through a modern web interface, then trigger a multi-agent AI pipeline that produces:
 
 - A **comprehensive written portfolio report** covering diversification, risk assessment, and actionable recommendations
 - **Interactive chart visualizations** (asset allocation, geographic exposure, sector breakdowns) rendered via Recharts
