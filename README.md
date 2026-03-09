@@ -20,7 +20,7 @@
 - [Getting Started](#getting-started)
 - [Cost Analysis](#cost-analysis)
 - [In Progress](#in-progress)
-- [What I Learned](#what-i-learned)
+
 
 ---
 
