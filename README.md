@@ -1,6 +1,6 @@
 
 
-# Stratos - AI-Powered Financial Advisory Platform
+# Stratos - AI-Native Financial Advisory Platform
 
 > **A production-grade, multi-agent SaaS platform that orchestrates 5 specialized AI agents to deliver automated portfolio analysis, interactive visualizations, and Monte Carlo retirement projections — all running on a fully serverless AWS architecture.**
 
