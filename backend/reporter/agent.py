@@ -79,19 +79,37 @@ def format_portfolio_for_analysis(portfolio_data: Dict[str, Any], user_data: Dic
             symbol = position.get("symbol")
             quantity = float(position.get("quantity", 0))
             instrument = position.get("instrument", {})
-            name = instrument.get("name", "")
+            inst_name = instrument.get("name", "")
+            inst_type = instrument.get("instrument_type", "")
+            price = instrument.get("current_price", 0)
 
-            allocations = []
-            if instrument.get("asset_class"):
-                allocations.append(f"Asset: {instrument['asset_class']}")
-            if instrument.get("regions"):
-                regions = ", ".join(
-                    [f"{r['name']} {r['percentage']}%" for r in instrument["regions"][:2]]
-                )
-                allocations.append(f"Regions: {regions}")
+            details = []
+            if inst_name:
+                details.append(inst_name)
+            if inst_type:
+                details.append(f"type={inst_type}")
+            if price:
+                details.append(f"price=${float(price):,.2f}")
 
-            alloc_str = f" ({', '.join(allocations)})" if allocations else ""
-            lines.append(f"  - {symbol}: {quantity:,.2f} shares{alloc_str}")
+            asset_class = instrument.get("allocation_asset_class", {})
+            if asset_class and isinstance(asset_class, dict):
+                primary = max(asset_class, key=asset_class.get)
+                details.append(f"asset_class={primary}({asset_class[primary]:.0f}%)")
+
+            regions = instrument.get("allocation_regions", {})
+            if regions and isinstance(regions, dict):
+                top_regions = sorted(regions.items(), key=lambda x: x[1], reverse=True)[:2]
+                region_str = ", ".join(f"{r}({p:.0f}%)" for r, p in top_regions)
+                details.append(f"regions={region_str}")
+
+            sectors = instrument.get("allocation_sectors", {})
+            if sectors and isinstance(sectors, dict):
+                top_sectors = sorted(sectors.items(), key=lambda x: x[1], reverse=True)[:2]
+                sector_str = ", ".join(f"{s}({p:.0f}%)" for s, p in top_sectors)
+                details.append(f"sectors={sector_str}")
+
+            detail_str = f" [{'; '.join(details)}]" if details else ""
+            lines.append(f"  - {symbol}: {quantity:,.2f} shares{detail_str}")
 
     lines.extend(
         [

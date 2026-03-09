@@ -1,10 +1,12 @@
 from massive import RESTClient
 from dotenv import load_dotenv
 import os
+import logging
 from datetime import datetime
-import random
 from functools import lru_cache
 from datetime import timezone
+
+logger = logging.getLogger(__name__)
 
 load_dotenv(override=True)
 
@@ -61,5 +63,7 @@ def get_share_price(symbol) -> float:
         try:
             return get_share_price_massive(symbol)
         except Exception as e:
-            print(f"Was not able to use the massive API due to {e}; using a random number")
-    return float(random.randint(1, 100))
+            logger.warning(f"Massive API failed for {symbol}: {e} — keeping existing DB price")
+    else:
+        logger.warning(f"MASSIVE_API_KEY not set — cannot fetch live price for {symbol}")
+    return 0.0

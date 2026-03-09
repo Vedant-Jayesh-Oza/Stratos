@@ -72,89 +72,105 @@ def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, floa
     }
 
 
+EQUITY_RETURN_MEAN = 0.07
+EQUITY_RETURN_STD = 0.18
+BOND_RETURN_MEAN = 0.04
+BOND_RETURN_STD = 0.05
+REAL_ESTATE_RETURN_MEAN = 0.06
+REAL_ESTATE_RETURN_STD = 0.12
+ANNUAL_CONTRIBUTION = 10000
+INFLATION_RATE = 1.03
+RETIREMENT_DURATION = 30
+
+
+def _portfolio_return(asset_allocation: Dict[str, float]) -> float:
+    """Single year stochastic portfolio return based on allocation."""
+    return (
+        asset_allocation["equity"] * random.gauss(EQUITY_RETURN_MEAN, EQUITY_RETURN_STD)
+        + asset_allocation["bonds"] * random.gauss(BOND_RETURN_MEAN, BOND_RETURN_STD)
+        + asset_allocation["real_estate"] * random.gauss(REAL_ESTATE_RETURN_MEAN, REAL_ESTATE_RETURN_STD)
+        + asset_allocation.get("commodities", 0) * random.gauss(0.04, 0.15)
+        + asset_allocation["cash"] * 0.02
+    )
+
+
 def run_monte_carlo_simulation(
     current_value: float,
     years_until_retirement: int,
     target_annual_income: float,
     asset_allocation: Dict[str, float],
+    current_age: int = 40,
     num_simulations: int = 500,
 ) -> Dict[str, Any]:
-    """Run Monte Carlo simulation for retirement planning."""
+    """Run Monte Carlo simulation and derive consistent projections from it."""
 
-    equity_return_mean = 0.07
-    equity_return_std = 0.18
-    bond_return_mean = 0.04
-    bond_return_std = 0.05
-    real_estate_return_mean = 0.06
-    real_estate_return_std = 0.12
+    total_years = years_until_retirement + RETIREMENT_DURATION
+    milestone_years = sorted(set(
+        list(range(0, total_years + 1, 5)) + [years_until_retirement]
+    ))
 
+    all_paths = []
     successful_scenarios = 0
     final_values = []
     years_lasted = []
 
     for _ in range(num_simulations):
+        path = {}
         portfolio_value = current_value
 
-        for _ in range(years_until_retirement):
-            equity_return = random.gauss(equity_return_mean, equity_return_std)
-            bond_return = random.gauss(bond_return_mean, bond_return_std)
-            real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
+        for year in range(1, years_until_retirement + 1):
+            portfolio_value = portfolio_value * (1 + _portfolio_return(asset_allocation))
+            portfolio_value += ANNUAL_CONTRIBUTION
+            if year in milestone_years:
+                path[year] = portfolio_value
 
-            portfolio_return = (
-                asset_allocation["equity"] * equity_return
-                + asset_allocation["bonds"] * bond_return
-                + asset_allocation["real_estate"] * real_estate_return
-                + asset_allocation["cash"] * 0.02
-            )
-
-            portfolio_value = portfolio_value * (1 + portfolio_return)
-            portfolio_value += 10000  
-
-        retirement_years = 30
+        value_at_retirement = portfolio_value
         annual_withdrawal = target_annual_income
         years_income_lasted = 0
 
-        for year in range(retirement_years):
+        for year_offset in range(1, RETIREMENT_DURATION + 1):
             if portfolio_value <= 0:
                 break
-
-            annual_withdrawal *= 1.03
-
-            equity_return = random.gauss(equity_return_mean, equity_return_std)
-            bond_return = random.gauss(bond_return_mean, bond_return_std)
-            real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
-
-            portfolio_return = (
-                asset_allocation["equity"] * equity_return
-                + asset_allocation["bonds"] * bond_return
-                + asset_allocation["real_estate"] * real_estate_return
-                + asset_allocation["cash"] * 0.02
-            )
-
-            portfolio_value = portfolio_value * (1 + portfolio_return) - annual_withdrawal
-
+            annual_withdrawal *= INFLATION_RATE
+            portfolio_value = portfolio_value * (1 + _portfolio_return(asset_allocation)) - annual_withdrawal
             if portfolio_value > 0:
                 years_income_lasted += 1
+            abs_year = years_until_retirement + year_offset
+            if abs_year in milestone_years:
+                path[abs_year] = max(0, portfolio_value)
 
         final_values.append(max(0, portfolio_value))
         years_lasted.append(years_income_lasted)
+        all_paths.append(path)
 
-        if years_income_lasted >= retirement_years:
+        if years_income_lasted >= RETIREMENT_DURATION:
             successful_scenarios += 1
 
     final_values.sort()
     success_rate = (successful_scenarios / num_simulations) * 100
 
-    expected_return = (
-        asset_allocation["equity"] * equity_return_mean
-        + asset_allocation["bonds"] * bond_return_mean
-        + asset_allocation["real_estate"] * real_estate_return_mean
-        + asset_allocation["cash"] * 0.02
-    )
-    expected_value_at_retirement = current_value
-    for _ in range(years_until_retirement):
-        expected_value_at_retirement *= 1 + expected_return
-        expected_value_at_retirement += 10000
+    projections = []
+    for year in milestone_years:
+        if year == 0:
+            projections.append({
+                "year": year, "age": current_age,
+                "p10": round(current_value), "median": round(current_value), "p90": round(current_value),
+                "phase": "accumulation", "annual_income": 0,
+            })
+            continue
+
+        values_at_year = sorted(p.get(year, 0) for p in all_paths)
+        p10 = values_at_year[max(0, num_simulations // 10)]
+        median = values_at_year[num_simulations // 2]
+        p90 = values_at_year[min(num_simulations - 1, 9 * num_simulations // 10)]
+        phase = "accumulation" if year <= years_until_retirement else "retirement"
+        annual_income = round(median * 0.04) if phase == "retirement" else 0
+
+        projections.append({
+            "year": year, "age": current_age + year,
+            "p10": round(p10), "median": round(median), "p90": round(p90),
+            "phase": phase, "annual_income": annual_income,
+        })
 
     return {
         "success_rate": round(success_rate, 1),
@@ -162,59 +178,11 @@ def run_monte_carlo_simulation(
         "percentile_10": round(final_values[num_simulations // 10], 2),
         "percentile_90": round(final_values[9 * num_simulations // 10], 2),
         "average_years_lasted": round(sum(years_lasted) / len(years_lasted), 1),
-        "expected_value_at_retirement": round(expected_value_at_retirement, 2),
+        "median_value_at_retirement": round(
+            sorted(p.get(years_until_retirement, 0) for p in all_paths)[num_simulations // 2]
+        ),
+        "projections": projections,
     }
-
-
-def generate_projections(
-    current_value: float,
-    years_until_retirement: int,
-    asset_allocation: Dict[str, float],
-    current_age: int,
-) -> list:
-    """Generate simplified retirement projections."""
-
-    expected_return = (
-        asset_allocation["equity"] * 0.07
-        + asset_allocation["bonds"] * 0.04
-        + asset_allocation["real_estate"] * 0.06
-        + asset_allocation["cash"] * 0.02
-    )
-
-    projections = []
-    portfolio_value = current_value
-
-    milestone_years = list(range(0, years_until_retirement + 31, 5))
-
-    for year in milestone_years:
-        age = current_age + year
-
-        if year <= years_until_retirement:
-            for _ in range(min(5, year)):
-                portfolio_value *= 1 + expected_return
-                portfolio_value += 10000
-            phase = "accumulation"
-            annual_income = 0
-        else:
-            withdrawal_rate = 0.04
-            annual_income = portfolio_value * withdrawal_rate
-            years_in_retirement = min(5, year - years_until_retirement)
-            for _ in range(years_in_retirement):
-                portfolio_value = portfolio_value * (1 + expected_return) - annual_income
-            phase = "retirement"
-
-        if portfolio_value > 0:
-            projections.append(
-                {
-                    "year": year,
-                    "age": age,
-                    "portfolio_value": round(portfolio_value, 2),
-                    "annual_income": round(annual_income, 2),
-                    "phase": phase,
-                }
-            )
-
-    return projections
 
 
 
@@ -237,12 +205,11 @@ def create_agent(
     allocation = calculate_asset_allocation(portfolio_data)
 
     monte_carlo = run_monte_carlo_simulation(
-        portfolio_value, years_until_retirement, target_income, allocation, num_simulations=500
+        portfolio_value, years_until_retirement, target_income, allocation,
+        current_age=current_age, num_simulations=500,
     )
 
-    projections = generate_projections(
-        portfolio_value, years_until_retirement, allocation, current_age
-    )
+    projections = monte_carlo["projections"]
 
     tools = []
 
@@ -257,23 +224,28 @@ def create_agent(
 - Current Age: {current_age}
 
 ## Monte Carlo Simulation Results (500 scenarios)
-- Success Rate: {monte_carlo["success_rate"]}% (probability of sustaining retirement income for 30 years)
-- Expected Portfolio Value at Retirement: ${monte_carlo["expected_value_at_retirement"]:,.0f}
-- 10th Percentile Outcome: ${monte_carlo["percentile_10"]:,.0f} (worst case)
-- Median Final Value: ${monte_carlo["median_final_value"]:,.0f}
-- 90th Percentile Outcome: ${monte_carlo["percentile_90"]:,.0f} (best case)
+- Success Rate: {monte_carlo["success_rate"]}% (probability of sustaining ${target_income:,.0f}/yr income for 30 years)
+- Median Portfolio Value at Retirement: ${monte_carlo["median_value_at_retirement"]:,.0f}
+- 10th Percentile Final Value (bad luck): ${monte_carlo["percentile_10"]:,.0f}
+- Median Final Value (after 30yr retirement): ${monte_carlo["median_final_value"]:,.0f}
+- 90th Percentile Final Value (good luck): ${monte_carlo["percentile_90"]:,.0f}
 - Average Years Portfolio Lasts: {monte_carlo["average_years_lasted"]} years
 
-## Key Projections (Milestones)
+## Projected Milestones (derived from the Monte Carlo paths above)
+| Age | 10th %ile | Median | 90th %ile | Phase |
+|-----|-----------|--------|-----------|-------|
 """
 
-    for proj in projections[:6]:
+    for proj in projections:
         if proj["phase"] == "accumulation":
-            task += f"- Age {proj['age']}: ${proj['portfolio_value']:,.0f} (building wealth)\n"
+            task += f"| {proj['age']} | ${proj['p10']:,.0f} | ${proj['median']:,.0f} | ${proj['p90']:,.0f} | Accumulation |\n"
         else:
-            task += f"- Age {proj['age']}: ${proj['portfolio_value']:,.0f} (annual income: ${proj['annual_income']:,.0f})\n"
+            task += f"| {proj['age']} | ${proj['p10']:,.0f} | ${proj['median']:,.0f} | ${proj['p90']:,.0f} | Retirement (est. income ${proj['annual_income']:,.0f}/yr) |\n"
 
     task += f"""
+NOTE: The projections above come directly from the same 500 Monte Carlo simulations.
+A success rate of {monte_carlo["success_rate"]}% means only {monte_carlo["success_rate"]}% of the 500 paths sustained the target income for 30 years.
+The median path shows the 50th percentile outcome — not a guaranteed result.
 
 ## Risk Factors to Consider
 - Sequence of returns risk (poor returns early in retirement)
@@ -288,10 +260,13 @@ def create_agent(
 - Gap: ${target_income - (portfolio_value * 0.04):,.0f}
 
 Your task: Analyze this retirement readiness data and provide a comprehensive retirement analysis including:
-1. Clear assessment of retirement readiness
+1. Clear assessment of retirement readiness based on the {monte_carlo["success_rate"]}% success rate
 2. Specific recommendations to improve success rate
 3. Risk mitigation strategies
 4. Action items with timeline
+
+IMPORTANT: The projections and the success rate come from the same simulation.
+If the success rate is low, acknowledge that most paths fail — do NOT present the median path as guaranteed.
 
 Provide your analysis in clear markdown format with specific numbers and actionable recommendations.
 """
