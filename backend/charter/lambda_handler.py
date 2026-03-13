@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 from typing import Dict, Any
+from datetime import datetime, timezone
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -35,22 +36,32 @@ logger.setLevel(logging.INFO)
 )
 async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None) -> Dict[str, Any]:
     """Run the charter agent to generate visualization data."""
-    
-    model, task = create_agent(job_id, portfolio_data, db)
-    
-    with trace("Charter Agent"):
-        agent = Agent(
-            name="Chart Maker",
-            instructions=CHARTER_INSTRUCTIONS,
-            model=model
-        )
-        
-        result = await Runner.run(
-            agent,
-            input=task,
-            max_turns=5  
-        )
-        
+    start_time = datetime.now(timezone.utc)
+    user_id = portfolio_data.get("user_id", "")
+
+    logger.info(json.dumps({
+        "event": "CHARTER_STARTED",
+        "job_id": job_id,
+        "user_id": user_id,
+        "timestamp": start_time.isoformat(),
+    }))
+
+    try:
+        model, task = create_agent(job_id, portfolio_data, db)
+
+        with trace("Charter Agent"):
+            agent = Agent(
+                name="Chart Maker",
+                instructions=CHARTER_INSTRUCTIONS,
+                model=model
+            )
+
+            result = await Runner.run(
+                agent,
+                input=task,
+                max_turns=5  
+            )
+
         output = result.final_output
         logger.info(f"Charter: Agent completed, output length: {len(output) if output else 0}")
         
@@ -105,12 +116,36 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
                 logger.error(f"Charter: No JSON structure found in output")
                 logger.error(f"Charter: Output preview: {output[:500]}...")
         
+        end_time = datetime.now(timezone.utc)
+        logger.info(json.dumps({
+            "event": "CHARTER_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "success" if charts_saved else "no_charts",
+            "charts_generated": len(charts_data) if charts_data else 0,
+            "timestamp": end_time.isoformat(),
+        }))
+
         return {
             'success': charts_saved,
             'message': f'Generated {len(charts_data) if charts_data else 0} charts' if charts_saved else 'Failed to generate charts',
             'charts_generated': len(charts_data) if charts_data else 0,
             'chart_keys': list(charts_data.keys()) if charts_data else []
         }
+
+    except Exception as e:
+        end_time = datetime.now(timezone.utc)
+        logger.error(json.dumps({
+            "event": "CHARTER_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "failed",
+            "error": str(e),
+            "timestamp": end_time.isoformat(),
+        }))
+        raise
 
 def lambda_handler(event, context):
     """

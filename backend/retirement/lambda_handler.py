@@ -7,7 +7,7 @@ import json
 import asyncio
 import logging
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -64,53 +64,86 @@ def get_user_preferences(job_id: str) -> Dict[str, Any]:
 )
 async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
     """Run the retirement specialist agent."""
-    
-    user_preferences = get_user_preferences(job_id)
-    
-    db = Database()
-    
-    model, tools, task = create_agent(job_id, portfolio_data, user_preferences, db)
-    
-    with trace("Retirement Agent"):
-        agent = Agent(
-            name="Retirement Specialist",
-            instructions=RETIREMENT_INSTRUCTIONS,
-            model=model,
-            tools=tools  
-        )
-        
-        try:
-            result = await Runner.run(
-                agent,
-                input=task,
-                max_turns=20
+    start_time = datetime.now(timezone.utc)
+    user_id = portfolio_data.get("user_id", "")
+
+    logger.info(json.dumps({
+        "event": "RETIREMENT_STARTED",
+        "job_id": job_id,
+        "user_id": user_id,
+        "timestamp": start_time.isoformat(),
+    }))
+
+    try:
+        user_preferences = get_user_preferences(job_id)
+
+        db = Database()
+
+        model, tools, task = create_agent(job_id, portfolio_data, user_preferences, db)
+
+        with trace("Retirement Agent"):
+            agent = Agent(
+                name="Retirement Specialist",
+                instructions=RETIREMENT_INSTRUCTIONS,
+                model=model,
+                tools=tools  
             )
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning(f"Retirement agent timeout: {e}")
-            raise AgentTemporaryError(f"Timeout during agent execution: {e}")
-        except Exception as e:
-            error_str = str(e).lower()
-            if "timeout" in error_str or "throttled" in error_str:
-                logger.warning(f"Retirement temporary error: {e}")
-                raise AgentTemporaryError(f"Temporary error: {e}")
-            raise  # Re-raise non-retryable errors
-        
-        retirement_payload = {
-            'analysis': result.final_output,
-            'generated_at': datetime.utcnow().isoformat(),
-            'agent': 'retirement'
-        }
-        
-        success = db.jobs.update_retirement(job_id, retirement_payload)
-        
-        if not success:
-            logger.error(f"Failed to save retirement analysis for job {job_id}")
-        
-        return {
-            'success': success,
-            'message': 'Retirement analysis completed' if success else 'Analysis completed but failed to save',
-            'final_output': result.final_output
-        }
+
+            try:
+                result = await Runner.run(
+                    agent,
+                    input=task,
+                    max_turns=20
+                )
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning(f"Retirement agent timeout: {e}")
+                raise AgentTemporaryError(f"Timeout during agent execution: {e}")
+            except Exception as e:
+                error_str = str(e).lower()
+                if "timeout" in error_str or "throttled" in error_str:
+                    logger.warning(f"Retirement temporary error: {e}")
+                    raise AgentTemporaryError(f"Temporary error: {e}")
+                raise  # Re-raise non-retryable errors
+
+            retirement_payload = {
+                'analysis': result.final_output,
+                'generated_at': datetime.utcnow().isoformat(),
+                'agent': 'retirement'
+            }
+
+            success = db.jobs.update_retirement(job_id, retirement_payload)
+
+            if not success:
+                logger.error(f"Failed to save retirement analysis for job {job_id}")
+
+            end_time = datetime.now(timezone.utc)
+            logger.info(json.dumps({
+                "event": "RETIREMENT_COMPLETED",
+                "job_id": job_id,
+                "user_id": user_id,
+                "duration_seconds": (end_time - start_time).total_seconds(),
+                "status": "success" if success else "save_failed",
+                "timestamp": end_time.isoformat(),
+            }))
+
+            return {
+                'success': success,
+                'message': 'Retirement analysis completed' if success else 'Analysis completed but failed to save',
+                'final_output': result.final_output
+            }
+
+    except Exception as e:
+        end_time = datetime.now(timezone.utc)
+        logger.error(json.dumps({
+            "event": "RETIREMENT_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "failed",
+            "error": str(e),
+            "timestamp": end_time.isoformat(),
+        }))
+        raise
 
 def lambda_handler(event, context):
     """

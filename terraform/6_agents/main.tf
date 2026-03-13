@@ -234,6 +234,7 @@ resource "aws_lambda_function" "planner" {
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
       LANGFUSE_HOST       = var.langfuse_host
       OPENAI_API_KEY      = var.openai_api_key
+      OPENAI_AGENTS_DISABLE_TRACING = "1"
     }
   }
 
@@ -280,6 +281,7 @@ resource "aws_lambda_function" "tagger" {
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
       LANGFUSE_HOST       = var.langfuse_host
       OPENAI_API_KEY      = var.openai_api_key
+      OPENAI_AGENTS_DISABLE_TRACING = "1"
     }
   }
   
@@ -318,6 +320,7 @@ resource "aws_lambda_function" "reporter" {
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
       LANGFUSE_HOST       = var.langfuse_host
       OPENAI_API_KEY      = var.openai_api_key
+      OPENAI_AGENTS_DISABLE_TRACING = "1"
     }
   }
 
@@ -356,6 +359,7 @@ resource "aws_lambda_function" "charter" {
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
       LANGFUSE_HOST       = var.langfuse_host
       OPENAI_API_KEY      = var.openai_api_key
+      OPENAI_AGENTS_DISABLE_TRACING = "1"
     }
   }
 
@@ -393,6 +397,7 @@ resource "aws_lambda_function" "retirement" {
       LANGFUSE_SECRET_KEY = var.langfuse_secret_key
       LANGFUSE_HOST       = var.langfuse_host
       OPENAI_API_KEY      = var.openai_api_key
+      OPENAI_AGENTS_DISABLE_TRACING = "1"
     }
   }
 

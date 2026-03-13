@@ -31,8 +31,23 @@ from src.schemas import (
 
 load_dotenv(override=True)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+class StructuredLogger:
+    """Structured JSON logging for API events"""
+
+    @staticmethod
+    def log_event(event_type: str, user_id: str | None = None, details: dict | None = None):
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "event_type": event_type,
+            "user_id": user_id,
+            "details": details or {},
+        }
+        logger.info(json.dumps(log_entry))
 
 app = FastAPI(
     title="Stratos Financial Advisor API",
@@ -95,7 +110,6 @@ clerk_guard = ClerkHTTPBearer(clerk_config)
 async def get_current_user_id(creds: HTTPAuthorizationCredentials = Depends(clerk_guard)) -> str:
     """Extract user ID from validated Clerk token"""
     user_id = creds.decoded["sub"]
-    logger.info(f"Authenticated user: {user_id}")
     return user_id
 
 class UserResponse(BaseModel):
@@ -146,6 +160,7 @@ async def get_or_create_user(
         user = db.users.find_by_clerk_id(clerk_user_id)
 
         if user:
+            StructuredLogger.log_event("USER_FETCHED", user_id=clerk_user_id)
             return UserResponse(user=user, created=False)
 
         token_data = creds.decoded
@@ -163,8 +178,7 @@ async def get_or_create_user(
         created_clerk_id = db.users.db.insert('users', user_data, returning='clerk_user_id')
 
         created_user = db.users.find_by_clerk_id(clerk_user_id)
-        logger.info(f"Created new user: {clerk_user_id}")
-
+        StructuredLogger.log_event("USER_CREATED", user_id=clerk_user_id, details={"display_name": display_name})
         return UserResponse(user=created_user, created=True)
 
     except Exception as e:
@@ -191,6 +205,7 @@ async def update_user(user_update: UserUpdate, clerk_user_id: str = Depends(get_
         )
 
         updated_user = db.users.find_by_clerk_id(clerk_user_id)
+        StructuredLogger.log_event("USER_UPDATED", user_id=clerk_user_id, details={"fields": list(update_data.keys())})
         return updated_user
 
     except Exception as e:
@@ -203,6 +218,7 @@ async def list_accounts(clerk_user_id: str = Depends(get_current_user_id)):
 
     try:
         accounts = db.accounts.find_by_user(clerk_user_id)
+        StructuredLogger.log_event("ACCOUNTS_LISTED", user_id=clerk_user_id, details={"count": len(accounts)})
         return accounts
 
     except Exception as e:
@@ -226,6 +242,7 @@ async def create_account(account: AccountCreate, clerk_user_id: str = Depends(ge
         )
 
         created_account = db.accounts.find_by_id(account_id)
+        StructuredLogger.log_event("ACCOUNT_CREATED", user_id=clerk_user_id, details={"account_id": account_id, "account_name": account.account_name})
         return created_account
 
     except Exception as e:
@@ -248,6 +265,7 @@ async def update_account(account_id: str, account_update: AccountUpdate, clerk_u
         db.accounts.update(account_id, update_data)
 
         updated_account = db.accounts.find_by_id(account_id)
+        StructuredLogger.log_event("ACCOUNT_UPDATED", user_id=clerk_user_id, details={"account_id": account_id})
         return updated_account
 
     except HTTPException:
@@ -273,7 +291,7 @@ async def delete_account(account_id: str, clerk_user_id: str = Depends(get_curre
             db.positions.delete(position['id'])
 
         db.accounts.delete(account_id)
-
+        StructuredLogger.log_event("ACCOUNT_DELETED", user_id=clerk_user_id, details={"account_id": account_id})
         return {"message": "Account deleted successfully"}
 
     except HTTPException:
@@ -304,6 +322,7 @@ async def list_positions(account_id: str, clerk_user_id: str = Depends(get_curre
                 'instrument': instrument
             })
 
+        StructuredLogger.log_event("POSITIONS_LISTED", user_id=clerk_user_id, details={"account_id": account_id, "count": len(formatted_positions)})
         return {"positions": formatted_positions}
 
     except HTTPException:
@@ -353,6 +372,7 @@ async def create_position(position: PositionCreate, clerk_user_id: str = Depends
         )
 
         created_position = db.positions.find_by_id(position_id)
+        StructuredLogger.log_event("POSITION_CREATED", user_id=clerk_user_id, details={"position_id": position_id, "account_id": position.account_id, "symbol": position.symbol.upper()})
         return created_position
 
     except HTTPException:
@@ -381,6 +401,7 @@ async def update_position(position_id: str, position_update: PositionUpdate, cle
         db.positions.update(position_id, update_data)
 
         updated_position = db.positions.find_by_id(position_id)
+        StructuredLogger.log_event("POSITION_UPDATED", user_id=clerk_user_id, details={"position_id": position_id})
         return updated_position
 
     except HTTPException:
@@ -406,6 +427,7 @@ async def delete_position(position_id: str, clerk_user_id: str = Depends(get_cur
             raise HTTPException(status_code=403, detail="Not authorized")
 
         db.positions.delete(position_id)
+        StructuredLogger.log_event("POSITION_DELETED", user_id=clerk_user_id, details={"position_id": position_id})
         return {"message": "Position deleted"}
 
     except HTTPException:
@@ -420,7 +442,7 @@ async def list_instruments(clerk_user_id: str = Depends(get_current_user_id)):
 
     try:
         instruments = db.instruments.find_all()
-        return [
+        result = [
             {
                 "symbol": inst["symbol"],
                 "name": inst["name"],
@@ -429,6 +451,8 @@ async def list_instruments(clerk_user_id: str = Depends(get_current_user_id)):
             }
             for inst in instruments
         ]
+        StructuredLogger.log_event("INSTRUMENTS_LISTED", user_id=clerk_user_id, details={"count": len(result)})
+        return result
     except Exception as e:
         logger.error(f"Error fetching instruments: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -463,10 +487,14 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
                 QueueUrl=SQS_QUEUE_URL,
                 MessageBody=json.dumps(message)
             )
-            logger.info(f"Sent analysis job to SQS: {job_id}")
         else:
             logger.warning("SQS_QUEUE_URL not configured, job created but not queued")
 
+        StructuredLogger.log_event(
+            "ANALYSIS_TRIGGERED",
+            user_id=clerk_user_id,
+            details={"job_id": str(job_id), "analysis_type": request.analysis_type, "options": request.options}
+        )
         return AnalyzeResponse(
             job_id=str(job_id),
             message="Analysis started. Check job status for results."
@@ -488,6 +516,7 @@ async def get_job_status(job_id: str, clerk_user_id: str = Depends(get_current_u
         if job.get('clerk_user_id') != clerk_user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
 
+        StructuredLogger.log_event("JOB_STATUS_FETCHED", user_id=clerk_user_id, details={"job_id": job_id})
         return job
 
     except HTTPException:
@@ -503,6 +532,7 @@ async def list_jobs(clerk_user_id: str = Depends(get_current_user_id)):
     try:
         user_jobs = db.jobs.find_by_user(clerk_user_id, limit=100)
         user_jobs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        StructuredLogger.log_event("JOBS_LISTED", user_id=clerk_user_id, details={"count": len(user_jobs)})
         return {"jobs": user_jobs}
 
     except Exception as e:
@@ -529,6 +559,7 @@ async def reset_accounts(clerk_user_id: str = Depends(get_current_user_id)):
             except Exception as e:
                 logger.warning(f"Could not delete account {account['id']}: {e}")
 
+        StructuredLogger.log_event("ACCOUNTS_RESET", user_id=clerk_user_id, details={"accounts_deleted": deleted_count})
         return {
             "message": f"Deleted {deleted_count} account(s)",
             "accounts_deleted": deleted_count
@@ -679,6 +710,7 @@ async def populate_test_data(clerk_user_id: str = Depends(get_current_user_id)):
             account['positions'] = positions
             all_accounts.append(account)
 
+        StructuredLogger.log_event("TEST_DATA_POPULATED", user_id=clerk_user_id, details={"accounts_created": len(created_accounts)})
         return {
             "message": "Test data populated successfully",
             "accounts_created": len(created_accounts),

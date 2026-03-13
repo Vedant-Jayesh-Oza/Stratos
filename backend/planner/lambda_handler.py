@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 from typing import Dict, Any
+from datetime import datetime, timezone
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -39,6 +40,25 @@ db = Database()
 )
 async def run_orchestrator(job_id: str) -> None:
     """Run the orchestrator agent to coordinate portfolio analysis."""
+    start_time = datetime.now(timezone.utc)
+
+    job = db.jobs.find_by_id(job_id)
+    if not job:
+        logger.error(json.dumps({
+            "event": "PLANNER_JOB_NOT_FOUND",
+            "job_id": job_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        return
+
+    user_id = job["clerk_user_id"]
+    logger.info(json.dumps({
+        "event": "PLANNER_STARTED",
+        "job_id": job_id,
+        "user_id": user_id,
+        "timestamp": start_time.isoformat(),
+    }))
+
     try:
         db.jobs.update_status(job_id, 'running')
         
@@ -68,9 +88,27 @@ async def run_orchestrator(job_id: str) -> None:
             )
             
             db.jobs.update_status(job_id, "completed")
-            logger.info(f"Planner: Job {job_id} completed successfully")
+            end_time = datetime.now(timezone.utc)
+            logger.info(json.dumps({
+                "event": "PLANNER_COMPLETED",
+                "job_id": job_id,
+                "user_id": user_id,
+                "duration_seconds": (end_time - start_time).total_seconds(),
+                "status": "success",
+                "timestamp": end_time.isoformat(),
+            }))
             
     except Exception as e:
+        end_time = datetime.now(timezone.utc)
+        logger.error(json.dumps({
+            "event": "PLANNER_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "failed",
+            "error": str(e),
+            "timestamp": end_time.isoformat(),
+        }))
         logger.error(f"Planner: Error in orchestration: {e}", exc_info=True)
         db.jobs.update_status(job_id, 'failed', error_message=str(e))
         raise

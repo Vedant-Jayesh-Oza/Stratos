@@ -8,6 +8,7 @@ import json
 import asyncio
 import logging
 from typing import List, Dict, Any
+from datetime import datetime, timezone
 
 from src import Database
 from src.schemas import InstrumentCreate
@@ -22,66 +23,98 @@ db = Database()
 async def process_instruments(instruments: List[Dict[str, str]]) -> Dict[str, Any]:
     """
     Process and classify instruments asynchronously.
-    
+
     Args:
         instruments: List of instruments to classify
-        
+
     Returns:
         Processing results
     """
-    logger.info(f"Classifying {len(instruments)} instruments")
-    classifications = await tag_instruments(instruments)
+    start_time = datetime.now(timezone.utc)
+
+    logger.info(json.dumps({
+        "event": "TAGGER_STARTED",
+        "instrument_count": len(instruments),
+        "timestamp": start_time.isoformat(),
+    }))
+
+    try:
+        classifications = await tag_instruments(instruments)
     
-    updated = []
-    errors = []
-    
-    for classification in classifications:
-        try:
-            db_instrument = classification_to_db_format(classification)
-            
-            existing = db.instruments.find_by_symbol(classification.symbol)
-            
-            if existing:
-                update_data = db_instrument.model_dump()
-                del update_data['symbol']
-                
-                rows = db.client.update(
-                    'instruments',
-                    update_data,
-                    "symbol = :symbol",
-                    {'symbol': classification.symbol}
-                )
-                logger.info(f"Updated {classification.symbol} in database ({rows} rows)")
-            else:
-                db.instruments.create_instrument(db_instrument)
-                logger.info(f"Created {classification.symbol} in database")
-            
-            updated.append(classification.symbol)
-            
-        except Exception as e:
-            logger.error(f"Error updating {classification.symbol}: {e}")
-            errors.append({
-                'symbol': classification.symbol,
-                'error': str(e)
-            })
-    
-    return {
-        'tagged': len(classifications),
-        'updated': updated,
-        'errors': errors,
-        'classifications': [
-            {
-                'symbol': c.symbol,
-                'name': c.name,
-                'type': c.instrument_type,
-                'current_price': c.current_price,
-                'asset_class': c.allocation_asset_class.model_dump(),
-                'regions': c.allocation_regions.model_dump(),
-                'sectors': c.allocation_sectors.model_dump()
-            }
-            for c in classifications
-        ]
-    }
+        updated = []
+        errors = []
+
+        for classification in classifications:
+            try:
+                db_instrument = classification_to_db_format(classification)
+
+                existing = db.instruments.find_by_symbol(classification.symbol)
+
+                if existing:
+                    update_data = db_instrument.model_dump()
+                    del update_data['symbol']
+
+                    rows = db.client.update(
+                        'instruments',
+                        update_data,
+                        "symbol = :symbol",
+                        {'symbol': classification.symbol}
+                    )
+                    logger.info(f"Updated {classification.symbol} in database ({rows} rows)")
+                else:
+                    db.instruments.create_instrument(db_instrument)
+                    logger.info(f"Created {classification.symbol} in database")
+
+                updated.append(classification.symbol)
+
+            except Exception as e:
+                logger.error(f"Error updating {classification.symbol}: {e}")
+                errors.append({
+                    'symbol': classification.symbol,
+                    'error': str(e)
+                })
+
+        end_time = datetime.now(timezone.utc)
+        logger.info(json.dumps({
+            "event": "TAGGER_COMPLETED",
+            "instrument_count": len(instruments),
+            "tagged": len(classifications),
+            "updated_count": len(updated),
+            "errors_count": len(errors),
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "success" if not errors else "partial",
+            "timestamp": end_time.isoformat(),
+        }))
+
+        return {
+            'tagged': len(classifications),
+            'updated': updated,
+            'errors': errors,
+            'classifications': [
+                {
+                    'symbol': c.symbol,
+                    'name': c.name,
+                    'type': c.instrument_type,
+                    'current_price': c.current_price,
+                    'asset_class': c.allocation_asset_class.model_dump(),
+                    'regions': c.allocation_regions.model_dump(),
+                    'sectors': c.allocation_sectors.model_dump()
+                }
+                for c in classifications
+            ]
+        }
+
+    except Exception as e:
+        end_time = datetime.now(timezone.utc)
+        logger.error(json.dumps({
+            "event": "TAGGER_COMPLETED",
+            "instrument_count": len(instruments),
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "failed",
+            "error": str(e),
+            "timestamp": end_time.isoformat(),
+        }))
+        raise
 
 def lambda_handler(event, context):
     """

@@ -15,6 +15,15 @@ massive_plan = os.getenv("MASSIVE_PLAN")
 
 is_paid_massive = massive_plan == "paid"
 
+_PLACEHOLDER_KEYS = {"your_massive_api_key_here", "your-api-key-here", "", None}
+if massive_api_key in _PLACEHOLDER_KEYS:
+    logger.error(
+        "MASSIVE_API_KEY is not configured. "
+        "Get a free key at https://massive.com and set it in terraform/6_agents/terraform.tfvars. "
+        "Live market prices will be unavailable until this is fixed."
+    )
+    massive_api_key = None
+
 
 def is_market_open() -> bool:
     client = RESTClient(massive_api_key)

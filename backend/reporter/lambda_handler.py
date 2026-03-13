@@ -7,7 +7,7 @@ import json
 import asyncio
 import logging
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -49,20 +49,30 @@ async def run_reporter_agent(
     observability=None,
 ) -> Dict[str, Any]:
     """Run the reporter agent to generate analysis."""
+    start_time = datetime.now(timezone.utc)
+    user_id = portfolio_data.get("user_id", "")
 
-    model, tools, task, context = create_agent(job_id, portfolio_data, user_data, db)
+    logger.info(json.dumps({
+        "event": "REPORTER_STARTED",
+        "job_id": job_id,
+        "user_id": user_id,
+        "timestamp": start_time.isoformat(),
+    }))
 
-    with trace("Reporter Agent"):
-        agent = Agent[ReporterContext](  
-            name="Report Writer", instructions=REPORTER_INSTRUCTIONS, model=model, tools=tools
-        )
+    try:
+        model, tools, task, context = create_agent(job_id, portfolio_data, user_data, db)
 
-        result = await Runner.run(
-            agent,
-            input=task,
-            context=context,  
-            max_turns=10,
-        )
+        with trace("Reporter Agent"):
+            agent = Agent[ReporterContext](  
+                name="Report Writer", instructions=REPORTER_INSTRUCTIONS, model=model, tools=tools
+            )
+
+            result = await Runner.run(
+                agent,
+                input=task,
+                context=context,  
+                max_turns=10,
+            )
 
         response = result.final_output
 
@@ -89,6 +99,16 @@ async def run_reporter_agent(
         if not success:
             logger.error(f"Failed to save report for job {job_id}")
 
+        end_time = datetime.now(timezone.utc)
+        logger.info(json.dumps({
+            "event": "REPORTER_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "success" if success else "save_failed",
+            "timestamp": end_time.isoformat(),
+        }))
+
         return {
             "success": success,
             "message": "Report generated and stored"
@@ -96,6 +116,19 @@ async def run_reporter_agent(
             else "Report generated but failed to save",
             "final_output": result.final_output,
         }
+
+    except Exception as e:
+        end_time = datetime.now(timezone.utc)
+        logger.error(json.dumps({
+            "event": "REPORTER_COMPLETED",
+            "job_id": job_id,
+            "user_id": user_id,
+            "duration_seconds": (end_time - start_time).total_seconds(),
+            "status": "failed",
+            "error": str(e),
+            "timestamp": end_time.isoformat(),
+        }))
+        raise
 
 
 def lambda_handler(event, context):

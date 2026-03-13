@@ -7,7 +7,7 @@ import json
 import boto3
 import logging
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from agents import function_tool, RunContextWrapper
@@ -34,6 +34,14 @@ async def invoke_lambda_agent(
     agent_name: str, function_name: str, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Invoke a Lambda function for an agent."""
+    job_id = payload.get("job_id", "")
+
+    logger.info(json.dumps({
+        "event": "AGENT_INVOKED",
+        "agent": agent_name.lower(),
+        "job_id": job_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
 
     if MOCK_LAMBDAS:
         logger.info(f"[MOCK] Would invoke {agent_name} with payload: {json.dumps(payload)[:200]}")
