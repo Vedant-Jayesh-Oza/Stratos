@@ -26,6 +26,64 @@ class ReporterContext:
     db: Optional[Any] = None  
 
 
+def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compute asset allocation as fractions of the TOTAL portfolio (including cash).
+    Uses the same methodology as the Retirement agent so both outputs are consistent.
+    Returns dollar values alongside fractions.
+    """
+    total_equity = 0.0
+    total_bonds = 0.0
+    total_real_estate = 0.0
+    total_commodities = 0.0
+    total_cash = 0.0
+    total_value = 0.0
+
+    for account in portfolio_data.get("accounts", []):
+        cash = float(account.get("cash_balance", 0))
+        total_cash += cash
+        total_value += cash
+
+        for position in account.get("positions", []):
+            quantity = float(position.get("quantity", 0))
+            instrument = position.get("instrument", {})
+            price = float(instrument.get("current_price", 100))
+            value = quantity * price
+            total_value += value
+
+            asset_allocation = instrument.get("allocation_asset_class", {})
+            if asset_allocation:
+                total_equity += value * asset_allocation.get("equity", 0) / 100
+                total_bonds += value * asset_allocation.get("fixed_income", 0) / 100
+                total_real_estate += value * asset_allocation.get("real_estate", 0) / 100
+                total_commodities += value * asset_allocation.get("commodities", 0) / 100
+
+    if total_value == 0:
+        return {
+            "fractions": {"equity": 0, "fixed_income": 0, "commodities": 0, "real_estate": 0, "cash": 0},
+            "dollars": {"equity": 0, "fixed_income": 0, "commodities": 0, "real_estate": 0, "cash": 0},
+            "total_value": 0,
+        }
+
+    return {
+        "fractions": {
+            "equity": total_equity / total_value,
+            "fixed_income": total_bonds / total_value,
+            "commodities": total_commodities / total_value,
+            "real_estate": total_real_estate / total_value,
+            "cash": total_cash / total_value,
+        },
+        "dollars": {
+            "equity": total_equity,
+            "fixed_income": total_bonds,
+            "commodities": total_commodities,
+            "real_estate": total_real_estate,
+            "cash": total_cash,
+        },
+        "total_value": total_value,
+    }
+
+
 def calculate_portfolio_metrics(portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
     """Calculate basic portfolio metrics."""
     metrics = {
@@ -122,6 +180,20 @@ def format_portfolio_for_analysis(portfolio_data: Dict[str, Any], user_data: Dic
         ]
     )
 
+    alloc = calculate_asset_allocation(portfolio_data)
+    fractions = alloc["fractions"]
+    dollars = alloc["dollars"]
+    total = alloc["total_value"]
+
+    lines.append("")
+    lines.append("PRE-COMPUTED PORTFOLIO ALLOCATION (verified Python calculation — use these exact figures, do not recalculate):")
+    lines.append(f"Total portfolio value (including cash): ${total:,.2f}")
+    for label, key in [("Cash", "cash"), ("Equity", "equity"), ("Fixed Income", "fixed_income"), ("Commodities", "commodities"), ("Real Estate", "real_estate")]:
+        frac = fractions.get(key, 0)
+        dol = dollars.get(key, 0)
+        if frac > 0:
+            lines.append(f"  {label}: {frac:.1%} (${dol:,.2f}) — of total portfolio including cash")
+
     return "\n".join(lines)
 
 
@@ -214,6 +286,13 @@ def create_agent(job_id: str, portfolio_data: Dict[str, Any], user_data: Dict[st
 
 {portfolio_summary}
 
+CRITICAL — ALLOCATION FIGURES: The portfolio summary above contains a section labeled
+"PRE-COMPUTED PORTFOLIO ALLOCATION". These figures were calculated in Python and are
+mathematically verified. You MUST use these exact percentages and dollar values when
+reporting asset allocation in the report. Do NOT attempt to recalculate them from the
+per-instrument data — doing so will produce incorrect results. All percentages are of
+the TOTAL portfolio including cash.
+
 Your task:
 1. First, get market insights for the top holdings using get_market_insights()
 2. Analyze the portfolio's current state, strengths, and weaknesses
@@ -221,7 +300,7 @@ Your task:
 
 The report should include:
 - Executive Summary
-- Portfolio Composition Analysis
+- Portfolio Composition Analysis (use the PRE-COMPUTED ALLOCATION figures exactly)
 - Risk Assessment
 - Diversification Analysis
 - Retirement Readiness (based on user goals)
