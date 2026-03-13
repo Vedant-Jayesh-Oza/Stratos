@@ -8,6 +8,7 @@ from typing import Dict, Any
 
 from agents.extensions.models.litellm_model import LitellmModel
 
+from guardrails import sanitize_user_input
 from templates import CHARTER_INSTRUCTIONS, create_charter_task
 
 logger = logging.getLogger()
@@ -24,8 +25,8 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
     account_totals = {}
 
     for account in portfolio_data.get("accounts", []):
-        account_name = account.get("name", "Unknown")
-        account_type = account.get("type", "unknown")
+        account_name = sanitize_user_input(account.get("name") or "Unknown")
+        account_type = sanitize_user_input(account.get("type") or "unknown")
         cash_balance = account.get("cash_balance")
         if cash_balance is None or cash_balance == "":
             cash = 0.0

@@ -16,6 +16,7 @@ from litellm.exceptions import RateLimitError
 
 from src.schemas import InstrumentCreate
 from templates import TAGGER_INSTRUCTIONS, CLASSIFICATION_PROMPT
+from guardrails import sanitize_user_input
 
 load_dotenv(override=True)
 
@@ -173,7 +174,9 @@ async def classify_instrument(
         model = LitellmModel(model=f"bedrock/{model_id}")
 
         task = CLASSIFICATION_PROMPT.format(
-            symbol=symbol, name=name, instrument_type=instrument_type
+            symbol=symbol,
+            name=sanitize_user_input(name),
+            instrument_type=instrument_type,
         )
 
         with trace(f"Classify {symbol}"):

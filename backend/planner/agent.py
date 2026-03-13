@@ -10,10 +10,19 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
 
+from guardrails import sanitize_user_input
+
 logger = logging.getLogger()
+
+
+class AgentTemporaryError(Exception):
+    """Temporary error that should trigger retry."""
+
 
 lambda_client = boto3.client("lambda")
 
@@ -30,10 +39,18 @@ class PlannerContext:
     job_id: str
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((AgentTemporaryError, TimeoutError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Agent invocation retry {retry_state.attempt_number}, next in {retry_state.next_action.sleep}s"
+    ),
+)
 async def invoke_lambda_agent(
     agent_name: str, function_name: str, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Invoke a Lambda function for an agent."""
+    """Invoke a Lambda function for an agent with automatic retry on temporary errors."""
     job_id = payload.get("job_id", "")
 
     logger.info(json.dumps({
@@ -67,11 +84,21 @@ async def invoke_lambda_agent(
             else:
                 result = result["body"]
 
+        if isinstance(result, dict) and result.get("error_type") == "RATE_LIMIT":
+            raise AgentTemporaryError(f"Rate limit hit for {agent_name}")
+
         logger.info(f"{agent_name} completed successfully")
         return result
 
+    except AgentTemporaryError:
+        raise
+    except TimeoutError:
+        raise
     except Exception as e:
-        logger.error(f"Error invoking {agent_name}: {e}")
+        logger.warning(f"Agent {agent_name} invocation failed: {e}")
+        error_str = str(e).lower()
+        if "throttled" in error_str or "timeout" in error_str:
+            raise AgentTemporaryError(f"Temporary error: {e}")
         return {"error": str(e)}
 
 
@@ -103,10 +130,13 @@ def handle_missing_instruments(job_id: str, db) -> None:
                 )
                 if not has_allocations:
                     missing.append(
-                        {"symbol": position["symbol"], "name": instrument.get("name", "")}
+                        {
+                            "symbol": position["symbol"],
+                            "name": sanitize_user_input(instrument.get("name") or ""),
+                        }
                     )
             else:
-                missing.append({"symbol": position["symbol"], "name": ""})
+                missing.append({"symbol": position["symbol"], "name": sanitize_user_input("")})
 
     if missing:
         logger.info(

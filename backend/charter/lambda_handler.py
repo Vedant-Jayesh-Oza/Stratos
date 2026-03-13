@@ -23,10 +23,54 @@ from src import Database
 
 from templates import CHARTER_INSTRUCTIONS
 from agent import create_agent
+from guardrails import sanitize_user_input, truncate_response
 from observability import observe
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def validate_chart_data(chart_json: str) -> tuple[bool, str, Dict[str, Any]]:
+    """
+    Validates that charter agent output is well-formed JSON with expected structure.
+    Returns (is_valid, error_message, parsed_data)
+    """
+    try:
+        data = json.loads(chart_json)
+
+        required_keys = ["charts"]
+        if not all(key in data for key in required_keys):
+            return False, f"Missing required keys. Expected: {required_keys}", {}
+
+        if not isinstance(data["charts"], list):
+            return False, "Charts must be an array", {}
+
+        for i, chart in enumerate(data["charts"]):
+            if "type" not in chart:
+                return False, f"Chart {i} missing 'type' field", {}
+
+            if "data" not in chart:
+                return False, f"Chart {i} missing 'data' field", {}
+
+            if not isinstance(chart["data"], list):
+                return False, f"Chart {i} data must be an array", {}
+
+            # Validate data points have name/value (template uses name+value for pie, bar, donut, horizontalBar)
+            for point in chart["data"]:
+                if "name" not in point and "category" not in point:
+                    return False, f"Chart {i} data points must have 'name' or 'category'", {}
+                if "value" not in point:
+                    return False, f"Chart {i} data points must have 'value'", {}
+
+        return True, "", data
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON from charter agent: {e}")
+        return False, f"Invalid JSON: {e}", {}
+    except Exception as e:
+        logger.error(f"Unexpected error validating chart data: {e}")
+        return False, f"Validation error: {e}", {}
+
 
 @retry(
     retry=retry_if_exception_type(RateLimitError),
@@ -62,7 +106,7 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
                 max_turns=5  
             )
 
-        output = result.final_output
+        output = truncate_response(result.final_output or "")
         logger.info(f"Charter: Agent completed, output length: {len(output) if output else 0}")
         
         if output:
@@ -84,34 +128,33 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
             if start_idx >= 0 and end_idx > start_idx:
                 json_str = output[start_idx:end_idx + 1]
                 logger.info(f"Charter: Extracted JSON substring, length: {len(json_str)}")
-                
-                try:
-                    parsed_data = json.loads(json_str)
-                    charts = parsed_data.get('charts', [])
-                    logger.info(f"Charter: Successfully parsed JSON, found {len(charts)} charts")
-                    
-                    if charts:
-                        charts_data = {}
-                        for chart in charts:
-                            chart_key = chart.get('key', f"chart_{len(charts_data) + 1}")
-                            chart_copy = {k: v for k, v in chart.items() if k != 'key'}
-                            charts_data[chart_key] = chart_copy
-                        
-                        logger.info(f"Charter: Created charts_data with keys: {list(charts_data.keys())}")
-                        
-                        if db and charts_data:
-                            try:
-                                success = db.jobs.update_charts(job_id, charts_data)
-                                charts_saved = bool(success)
-                                logger.info(f"Charter: Database update returned: {success}")
-                            except Exception as e:
-                                logger.error(f"Charter: Database error: {e}")
-                    else:
-                        logger.warning("Charter: No charts found in parsed JSON")
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"Charter: Failed to parse JSON: {e}")
-                    logger.error(f"Charter: JSON string attempted: {json_str[:500]}...")
+
+                is_valid, error_msg, parsed_data = validate_chart_data(json_str)
+                if not is_valid:
+                    logger.error(f"Charter agent produced invalid output for job {job_id}: {error_msg}")
+                    charts = []
+                else:
+                    charts = parsed_data.get("charts", [])
+                    logger.info(f"Charter: Successfully parsed and validated JSON, found {len(charts)} charts")
+
+                if charts:
+                    charts_data = {}
+                    for chart in charts:
+                        chart_key = chart.get('key', f"chart_{len(charts_data) + 1}")
+                        chart_copy = {k: v for k, v in chart.items() if k != 'key'}
+                        charts_data[chart_key] = chart_copy
+
+                    logger.info(f"Charter: Created charts_data with keys: {list(charts_data.keys())}")
+
+                    if db and charts_data:
+                        try:
+                            success = db.jobs.update_charts(job_id, charts_data)
+                            charts_saved = bool(success)
+                            logger.info(f"Charter: Database update returned: {success}")
+                        except Exception as e:
+                            logger.error(f"Charter: Database error: {e}")
+                else:
+                    logger.warning("Charter: No charts found in parsed JSON")
             else:
                 logger.error(f"Charter: No JSON structure found in output")
                 logger.error(f"Charter: Output preview: {output[:500]}...")
@@ -193,7 +236,7 @@ def lambda_handler(event, context):
                         for account in accounts:
                             account_data = {
                                 'id': account['id'],
-                                'name': account['account_name'],
+                                'name': sanitize_user_input(account.get('account_name') or 'Unknown'),
                                 'type': account.get('account_type', 'investment'),
                                 'cash_balance': float(account.get('cash_balance', 0)),
                                 'positions': []

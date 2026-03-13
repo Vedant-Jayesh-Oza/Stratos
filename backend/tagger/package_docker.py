@@ -66,7 +66,8 @@ def package_lambda():
         shutil.copy(tagger_dir / "agent.py", package_dir)
         shutil.copy(tagger_dir / "templates.py", package_dir)
         shutil.copy(tagger_dir / "observability.py", package_dir)
-        
+        shutil.copy(backend_dir / "guardrails.py", package_dir)
+
         zip_path = tagger_dir / "tagger_lambda.zip"
         
         if zip_path.exists():

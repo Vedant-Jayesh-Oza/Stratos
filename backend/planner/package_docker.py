@@ -70,7 +70,8 @@ def package_lambda():
         shutil.copy(planner_dir / "market.py", package_dir)
         shutil.copy(planner_dir / "prices.py", package_dir)
         shutil.copy(planner_dir / "observability.py", package_dir)
-        
+        shutil.copy(backend_dir / "guardrails.py", package_dir)
+
         zip_path = planner_dir / "planner_lambda.zip"
         
         if zip_path.exists():

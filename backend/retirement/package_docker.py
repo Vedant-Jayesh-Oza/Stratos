@@ -66,7 +66,8 @@ def package_lambda():
         shutil.copy(retirement_dir / "agent.py", package_dir)
         shutil.copy(retirement_dir / "templates.py", package_dir)
         shutil.copy(retirement_dir / "observability.py", package_dir)
-        
+        shutil.copy(backend_dir / "guardrails.py", package_dir)
+
         zip_path = retirement_dir / "retirement_lambda.zip"
         
         if zip_path.exists():

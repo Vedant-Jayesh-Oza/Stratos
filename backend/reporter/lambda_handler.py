@@ -27,6 +27,7 @@ from src import Database
 
 from templates import REPORTER_INSTRUCTIONS
 from agent import create_agent, ReporterContext
+from guardrails import sanitize_user_input, truncate_response
 from observability import observe
 
 logger = logging.getLogger()
@@ -88,6 +89,7 @@ async def run_reporter_agent(
                     logger.error(f"Reporter score is too low: {score}")
                     response = "I'm sorry, I'm not able to generate a report for you. Please try again later."
 
+        response = truncate_response(response or "")
         report_payload = {
             "content": response,
             "generated_at": datetime.utcnow().isoformat(),
@@ -114,7 +116,7 @@ async def run_reporter_agent(
             "message": "Report generated and stored"
             if success
             else "Report generated but failed to save",
-            "final_output": result.final_output,
+            "final_output": response,
         }
 
     except Exception as e:
@@ -175,7 +177,7 @@ def lambda_handler(event, context):
                             positions = db.positions.find_by_account(account["id"])
                             account_data = {
                                 "id": account["id"],
-                                "name": account["account_name"],
+                                "name": sanitize_user_input(account.get("account_name") or "Unknown"),
                                 "type": account.get("account_type", "investment"),
                                 "cash_balance": float(account.get("cash_balance", 0)),
                                 "positions": [],

@@ -28,6 +28,7 @@ from src import Database
 
 from templates import RETIREMENT_INSTRUCTIONS
 from agent import create_agent
+from guardrails import sanitize_user_input, truncate_response
 from observability import observe
 
 logger = logging.getLogger()
@@ -105,8 +106,9 @@ async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> D
                     raise AgentTemporaryError(f"Temporary error: {e}")
                 raise  # Re-raise non-retryable errors
 
+            analysis = truncate_response(result.final_output or "")
             retirement_payload = {
-                'analysis': result.final_output,
+                'analysis': analysis,
                 'generated_at': datetime.utcnow().isoformat(),
                 'agent': 'retirement'
             }
@@ -129,7 +131,7 @@ async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> D
             return {
                 'success': success,
                 'message': 'Retirement analysis completed' if success else 'Analysis completed but failed to save',
-                'final_output': result.final_output
+                'final_output': analysis
             }
 
     except Exception as e:
@@ -199,7 +201,7 @@ def lambda_handler(event, context):
                         for account in accounts:
                             account_data = {
                                 'id': account['id'],
-                                'name': account['account_name'],
+                                'name': sanitize_user_input(account.get('account_name') or 'Unknown'),
                                 'type': account.get('account_type', 'investment'),
                                 'cash_balance': float(account.get('cash_balance', 0)),
                                 'positions': []

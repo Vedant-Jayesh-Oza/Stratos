@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
 
+from guardrails import sanitize_user_input
+
 logger = logging.getLogger()
 
 
@@ -71,7 +73,7 @@ def format_portfolio_for_analysis(portfolio_data: Dict[str, Any], user_data: Dic
     ]
 
     for account in portfolio_data.get("accounts", []):
-        name = account.get("name", "Unknown")
+        name = sanitize_user_input(account.get("name") or "Unknown")
         cash = float(account.get("cash_balance", 0))
         lines.append(f"\n{name} (${cash:,.2f} cash):")
 
@@ -79,7 +81,7 @@ def format_portfolio_for_analysis(portfolio_data: Dict[str, Any], user_data: Dic
             symbol = position.get("symbol")
             quantity = float(position.get("quantity", 0))
             instrument = position.get("instrument", {})
-            inst_name = instrument.get("name", "")
+            inst_name = sanitize_user_input(instrument.get("name") or "")
             inst_type = instrument.get("instrument_type", "")
             price = instrument.get("current_price", 0)
 
