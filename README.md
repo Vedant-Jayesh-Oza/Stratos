@@ -1,8 +1,18 @@
 # Stratos - AI-Native Financial Advisory Platform
 
 > **A production-grade, multi-agent SaaS platform that orchestrates 6 specialized AI agents to deliver automated portfolio analysis, interactive visualizations, and Monte Carlo retirement projections - all running on a fully serverless AWS architecture.**
+> 
+<p align="center">
+  <a href="https://youtu.be/gLITMCZ-ksI">
+    <img src="https://github.com/user-attachments/assets/38b1a978-f7f2-4436-bdaf-3dfc80a70207" 
+         alt="LumenAI Demo 2" 
+         width="100%" />
+  </a>
+</p>
 
----
+<p align="center">
+  <b>▶️ Click the image to watch the demo</b>
+</p>
 
 ## Table of Contents
 
@@ -12,12 +22,10 @@
 - [Agent Orchestra](#agent-orchestra)
 - [RAG Pipeline & Knowledge Base](#rag-pipeline--knowledge-base)
 - [Database Schema](#database-schema)
-- [Frontend](#frontend)
 - [Observability](#observability)
-- [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 
----
+
 
 ## Overview
 
