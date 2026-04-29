@@ -1,4 +1,4 @@
-# Stratos - AI-Native Financial Advisory Platform
+# Stratos - AI-Native Financial Advisory Platform (AWS Nova Hackathon)
 
 > **A production-grade, multi-agent SaaS platform that orchestrates 6 specialized AI agents to deliver automated portfolio analysis, interactive visualizations, and Monte Carlo retirement projections - all running on a fully serverless AWS architecture.**
 > 
